@@ -153,7 +153,7 @@ export const handlePositions = (bounds: Bounds) => {
     s: { x: centerX, y: y + height },
     sw: { x, y: y + height },
     w: { x, y: centerY },
-    rotate: { x: centerX, y: y - 32 }
+    rotate: { x: centerX, y: y - 72 }
   } as Record<HandleType, Point>;
 };
 

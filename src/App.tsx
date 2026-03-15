@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Save,
   Sun,
+  Trash2,
   Undo2,
   Redo2,
   Upload,
@@ -148,6 +149,25 @@ const App = () => {
       {!topCollapsed && (
         <div className="glass-panel mb-3 rounded-3xl p-2">
           <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory scroll-px-2 sm:overflow-x-auto xl:overflow-visible xl:flex-wrap">
+            <button
+              className={`group snap-start shrink-0 min-w-[72px] rounded-2xl px-3 py-3 text-center transition sm:min-w-[76px] xl:min-w-[88px] ${
+                state.selection.selectedIds.length
+                  ? "hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-300"
+                  : "cursor-not-allowed opacity-40"
+              }`}
+              onClick={() => {
+                if (!state.selection.selectedIds.length) return;
+                state.pushHistory();
+                state.removeElements(state.selection.selectedIds);
+              }}
+              title="Delete selected"
+              aria-label="Delete selected"
+              disabled={!state.selection.selectedIds.length}
+            >
+              <Trash2 size={18} className="mx-auto" />
+              <div className="mt-1 text-[10px] font-medium sm:text-[11px]">Delete</div>
+              <div className="text-[9px] text-current/70 sm:text-[10px]">Del</div>
+            </button>
             {TOOL_DEFINITIONS.map((tool) => {
               const Icon = tool.icon;
               const active = state.activeTool === tool.id;

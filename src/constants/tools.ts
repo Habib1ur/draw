@@ -4,7 +4,6 @@ import {
   Diamond,
   Eraser,
   Hand,
-  Image,
   Minus,
   MousePointer2,
   PaintBucket,
@@ -34,5 +33,4 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   { id: "line", label: "Line", shortcut: "L", icon: Minus },
   { id: "arrow", label: "Arrow", shortcut: "A", icon: ArrowRight },
   { id: "text", label: "Text", shortcut: "T", icon: Type },
-  { id: "image", label: "Image", shortcut: "I", icon: Image }
 ];
