@@ -2,7 +2,7 @@ import rough from "roughjs/bin/rough";
 import type { Options } from "roughjs/bin/core";
 import { jsPDF } from "jspdf";
 import type { DrawableElement, ExportSettings, Point, SceneState } from "../types/editor";
-import { getElementBounds, getSelectionBounds, isClosedLoop, measureTextLines } from "./geometry";
+import { closeLoopPoints, getElementBounds, getSelectionBounds, measureTextLines } from "./geometry";
 
 const dashForStyle = (style: string) => {
   if (style === "dashed") return [10, 6];
@@ -20,6 +20,49 @@ const roughOptions = (element: DrawableElement): Options => ({
   fillLineDash: dashForStyle(element.style.strokeStyle),
   bowing: 1.25
 });
+
+const buildSmoothSvgPath = (points: Point[], closed = false) => {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  if (points.length === 2) {
+    const line = `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+    return closed ? `${line} Z` : line;
+  }
+
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    d += ` Q ${current.x} ${current.y} ${midX} ${midY}`;
+  }
+  const last = points[points.length - 1];
+  d += ` T ${last.x} ${last.y}`;
+  return closed ? `${d} Z` : d;
+};
+
+const drawSmoothStroke = (context: CanvasRenderingContext2D, points: Point[], closed = false) => {
+  if (points.length === 0) return;
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+
+  if (points.length === 1) {
+    context.lineTo(points[0].x + 0.01, points[0].y + 0.01);
+  } else if (points.length === 2) {
+    context.lineTo(points[1].x, points[1].y);
+  } else {
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const current = points[index];
+      const next = points[index + 1];
+      context.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
+    }
+    const last = points[points.length - 1];
+    context.quadraticCurveTo(last.x, last.y, last.x, last.y);
+  }
+
+  if (closed) context.closePath();
+};
 
 const applyCanvasStyle = (context: CanvasRenderingContext2D, element: DrawableElement) => {
   context.globalAlpha = element.style.opacity / 100;
@@ -134,12 +177,9 @@ export const drawElement = (
         break;
       case "pencil":
         if (element.points.length > 1) {
-          const closed = isClosedLoop(element.points, Math.max(10, element.style.strokeWidth * 3));
-          context.beginPath();
-          context.moveTo(element.points[0].x, element.points[0].y);
-          element.points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
-          if (closed) context.closePath();
-          if (closed && element.style.fillColor !== "transparent") context.fill();
+          const closedPoints = closeLoopPoints(element.points, element.style.strokeWidth);
+          drawSmoothStroke(context, closedPoints ?? element.points, Boolean(closedPoints));
+          if (closedPoints && element.style.fillColor !== "transparent") context.fill();
           context.stroke();
         }
         break;
@@ -246,12 +286,14 @@ const buildSvgMarkup = (elements: DrawableElement[], scene: SceneState, settings
     if (!node) {
       if (element.type === "pencil") {
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        const closed = isClosedLoop(element.points, Math.max(10, element.style.strokeWidth * 3));
-        const d = element.points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x - bounds.x + padding} ${point.y - bounds.y + padding}`).join(" ");
-        path.setAttribute("d", closed ? `${d} Z` : d);
-        path.setAttribute("fill", closed && element.style.fillColor !== "transparent" ? element.style.fillColor : "none");
+        const closedPoints = closeLoopPoints(element.points, element.style.strokeWidth);
+        const shiftedPoints = (closedPoints ?? element.points).map((point) => ({ x: point.x - bounds.x + padding, y: point.y - bounds.y + padding }));
+        path.setAttribute("d", buildSmoothSvgPath(shiftedPoints, Boolean(closedPoints)));
+        path.setAttribute("fill", closedPoints && element.style.fillColor !== "transparent" ? element.style.fillColor : "none");
         path.setAttribute("stroke", element.style.strokeColor);
         path.setAttribute("stroke-width", `${element.style.strokeWidth}`);
+        path.setAttribute("stroke-linecap", "round");
+        path.setAttribute("stroke-linejoin", "round");
         node = path;
       } else if (element.type === "line" || element.type === "arrow") {
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");

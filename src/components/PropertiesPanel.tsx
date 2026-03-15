@@ -1,4 +1,4 @@
-import { Group, Layers, Lock, MoveVertical, Palette, SquareDashedMousePointer, Trash2, Type, Ungroup } from "lucide-react";
+import { Eraser, Group, Layers, Lock, MoveVertical, Palette, SquareDashedMousePointer, Trash2, Type, Ungroup } from "lucide-react";
 import { useMemo } from "react";
 import { useEditorStore, selectSelectedElements } from "../store/editorStore";
 
@@ -48,6 +48,16 @@ export const PropertiesPanel = () => {
             <option value="wireframe">Wireframe</option>
           </select>
         </section>
+
+        {(state.activeTool === "pencil" || state.activeTool === "line" || state.activeTool === "arrow") && (
+          <section>
+            <div className="mb-2 font-medium">Brush</div>
+            <label className="rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-white/10 dark:bg-slate-900/40">
+              Size {style.strokeWidth}px
+              <input type="range" min="1" max="24" value={style.strokeWidth} onChange={(event) => applyStyle({ strokeWidth: Number(event.target.value) })} className="mt-2 w-full" />
+            </label>
+          </section>
+        )}
 
         <section>
           <div className="mb-2 flex items-center gap-2 font-medium"><Palette size={14} /> Stroke</div>
@@ -128,6 +138,40 @@ export const PropertiesPanel = () => {
           </div>
           <input type="color" className="mt-2 h-11 w-full rounded-2xl border border-slate-200 bg-white/70 p-2 dark:border-white/10 dark:bg-slate-900/40" value={state.scene.background} onChange={(event) => state.setBackground(event.target.value)} />
         </section>
+
+        {state.activeTool === "eraser" && (
+          <section>
+            <div className="mb-2 flex items-center gap-2 font-medium"><Eraser size={14} /> Eraser</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <button
+                className={`rounded-2xl border px-3 py-2 ${state.preferences.eraserMode === "partial" ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900" : "border-slate-200 dark:border-white/10"}`}
+                onClick={() => state.setEraserMode("partial")}
+              >
+                Brushed part
+              </button>
+              <button
+                className={`rounded-2xl border px-3 py-2 ${state.preferences.eraserMode === "full" ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900" : "border-slate-200 dark:border-white/10"}`}
+                onClick={() => state.setEraserMode("full")}
+              >
+                Full element
+              </button>
+            </div>
+            <label className="mt-2 rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-white/10 dark:bg-slate-900/40">
+              Size {state.preferences.eraserSize}px
+              <input
+                type="range"
+                min="6"
+                max="48"
+                value={state.preferences.eraserSize}
+                onChange={(event) => state.setEraserSize(Number(event.target.value))}
+                className="mt-2 w-full"
+              />
+            </label>
+            <div className="mt-2 rounded-2xl bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-900/40 dark:text-slate-300">
+              Brushed part cuts pencil strokes while you drag. Full element removes the whole hit object while you swipe.
+            </div>
+          </section>
+        )}
 
         {selectedElements.length > 0 && (
           <section>

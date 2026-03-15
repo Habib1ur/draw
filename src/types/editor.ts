@@ -27,6 +27,7 @@ export type FillStyle = "solid" | "hachure" | "cross-hatch";
 export type RenderStyle = "rough" | "clean";
 export type ThemeMode = "light" | "dark" | "system";
 export type ArrowheadStyle = "none" | "triangle" | "dot";
+export type EraserMode = "partial" | "full";
 export type HandleType =
   | "n"
   | "s"
@@ -173,6 +174,8 @@ export interface EditorPreferences {
   showShortcuts: boolean;
   stylePreset: "sketch" | "clean" | "presentation" | "marker" | "wireframe";
   lastUsedTool: ToolType;
+  eraserMode: EraserMode;
+  eraserSize: number;
 }
 
 export interface HistoryState {

@@ -3,17 +3,21 @@ import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent }
 import type { Bounds, DrawableElement, ElementStyle, HandleType, Point, TextElement, ToolType } from "../../types/editor";
 import { getElementGroupMembers, useEditorStore, selectSelectedElements } from "../../store/editorStore";
 import { createElement } from "../../utils/element";
+import { createId } from "../../utils/id";
 import {
   distance,
+  distanceToSegment,
+  elementWithinRadius,
   getElementBounds,
   getHandleAtPoint,
   getSelectionBounds,
   handlePositions,
   hitTestElement,
-  isClosedLoop,
+  closeLoopPoints,
   measureTextLines,
   pointInPolygon,
   normalizeRect,
+  pointInBounds,
   resizeBounds,
   screenToWorld,
   snapPoint,
@@ -21,6 +25,7 @@ import {
   worldToScreen
 } from "../../utils/geometry";
 import { drawElement } from "../../utils/export";
+import { createRegionFillElement } from "../../utils/fill";
 
 interface GuideLine {
   orientation: "vertical" | "horizontal";
@@ -30,7 +35,7 @@ interface GuideLine {
 }
 
 interface InteractionState {
-  mode: "idle" | "pan" | "move" | "draw" | "marquee" | "resize" | "rotate";
+  mode: "idle" | "pan" | "move" | "draw" | "erase" | "marquee" | "resize" | "rotate";
   pointerId: number | null;
   originScreen: Point;
   originWorld: Point;
@@ -70,6 +75,95 @@ const scalePoint = (point: Point, bounds: Bounds, nextBounds: Bounds): Point => 
     x: nextBounds.x + (point.x - bounds.x) * scaleX,
     y: nextBounds.y + (point.y - bounds.y) * scaleY
   };
+};
+
+const erasePencilSegments = (element: Extract<DrawableElement, { type: "pencil" }>, point: Point, radius: number) => {
+  const keptSegments: Point[][] = [];
+  let current: Point[] = [];
+  const threshold = radius + Math.max(4, element.style.strokeWidth / 2);
+
+  if (element.points.length < 2) return keptSegments;
+
+  current.push(element.points[0]);
+
+  for (let index = 0; index < element.points.length - 1; index += 1) {
+    const start = element.points[index];
+    const end = element.points[index + 1];
+    const intersectsBrush = distanceToSegment(point, start, end) <= threshold;
+
+    if (intersectsBrush) {
+      if (current.length > 1) keptSegments.push(current);
+      current = [end];
+      continue;
+    }
+
+    current.push(end);
+  }
+
+  if (current.length > 1) keptSegments.push(current);
+  return keptSegments;
+};
+
+const applyEraseAtPoint = (state: ReturnType<typeof useEditorStore.getState>, point: Point) => {
+  const radius = state.preferences.eraserSize;
+  const hits = state.scene.elements
+    .slice()
+    .sort((a, b) => b.zIndex - a.zIndex)
+    .filter((element) => element.visible && !element.locked && elementWithinRadius(point, radius, element));
+
+  if (!hits.length) return;
+
+  const removeIds = new Set<string>();
+  const partialPencilIds = new Set<string>();
+
+  hits.forEach((hit) => {
+    if (state.preferences.eraserMode === "partial" && hit.type === "pencil") {
+      partialPencilIds.add(hit.id);
+      return;
+    }
+    getElementGroupMembers(state, hit).forEach((member) => removeIds.add(member.id));
+  });
+
+  const nextElements: DrawableElement[] = [];
+  state.scene.elements.forEach((element) => {
+    if (removeIds.has(element.id)) return;
+
+    if (partialPencilIds.has(element.id) && element.type === "pencil") {
+      const segments = erasePencilSegments(element, point, radius);
+      segments.forEach((segment, index) => {
+        const bounds = getElementBounds({ ...element, points: segment });
+        nextElements.push({
+          ...element,
+          id: index === 0 ? element.id : createId(),
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          points: segment,
+          updatedAt: Date.now()
+        });
+      });
+      return;
+    }
+
+    nextElements.push(element);
+  });
+
+  state.setElements(nextElements);
+  state.setSelection([]);
+};
+
+const applyEraseAlongPath = (state: ReturnType<typeof useEditorStore.getState>, from: Point, to: Point) => {
+  const distanceTotal = Math.max(1, distance(from, to));
+  const step = Math.max(2, state.preferences.eraserSize * 0.35);
+  const steps = Math.max(1, Math.ceil(distanceTotal / step));
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    applyEraseAtPoint(state, {
+      x: from.x + (to.x - from.x) * t,
+      y: from.y + (to.y - from.y) * t
+    });
+  }
 };
 
 const resizeElement = (original: DrawableElement, nextBounds: Bounds): DrawableElement => {
@@ -279,7 +373,10 @@ export const CanvasView = () => {
     .find((element) => {
       if (!element.visible || element.locked) return false;
       if (["rectangle", "ellipse", "diamond"].includes(element.type)) return Boolean(hitTestElement(worldPoint, element));
-      return element.type === "pencil" && isClosedLoop(element.points, Math.max(10, element.style.strokeWidth * 3)) && pointInPolygon(worldPoint, element.points);
+      if (element.type !== "pencil") return false;
+      const closedPoints = closeLoopPoints(element.points, element.style.strokeWidth);
+      if (!closedPoints) return false;
+      return pointInPolygon(worldPoint, closedPoints);
     });
 
   const pointerToPoints = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -339,7 +436,7 @@ export const CanvasView = () => {
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const state = useEditorStore.getState();
     const { screen, world } = pointerToPoints(event);
-    const snapped = state.activeTool === "pencil" ? world : snapPoint(world, state.scene.snapToGrid);
+    const snapped = state.activeTool === "pencil" || state.activeTool === "eraser" || state.activeTool === "fill" ? world : snapPoint(world, state.scene.snapToGrid);
 
     if (state.activeTool === "text") {
       event.preventDefault();
@@ -405,6 +502,15 @@ export const CanvasView = () => {
         return;
       }
 
+      if (selectionBounds && state.selection.selectedIds.length && pointInBounds(snapped, selectionBounds, 10 / Math.max(0.5, viewport.zoom))) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        state.pushHistory();
+        interaction.mode = "move";
+        interaction.targetIds = [...state.selection.selectedIds];
+        interaction.selectedSnapshot = new Map(state.scene.elements.filter((element) => state.selection.selectedIds.includes(element.id)).map((element) => [element.id, structuredClone(element)]));
+        return;
+      }
+
       const hit = findTopElement(snapped);
       if (hit) {
         if (event.detail === 2 && hit.type === "text") {
@@ -434,9 +540,9 @@ export const CanvasView = () => {
     }
 
     if (state.activeTool === "fill") {
+      const nextFillColor = state.activeStyle.fillColor === "transparent" || state.activeStyle.fillColor.toLowerCase() === state.scene.background.toLowerCase() ? state.activeStyle.strokeColor : state.activeStyle.fillColor;
       const hit = findFillTarget(snapped);
       if (hit && (["rectangle", "ellipse", "diamond"].includes(hit.type) || hit.type === "pencil")) {
-        const nextFillColor = state.activeStyle.fillColor === "transparent" || state.activeStyle.fillColor.toLowerCase() === state.scene.background.toLowerCase() ? state.activeStyle.strokeColor : state.activeStyle.fillColor;
         state.pushHistory();
         state.updateElement(hit.id, (element) => ({
           ...element,
@@ -451,17 +557,25 @@ export const CanvasView = () => {
         }));
         state.setSelection([hit.id]);
       } else {
-        state.setErrorMessage("Fill works on closed shapes and closed pencil loops.");
+        const fillElement = createRegionFillElement(state.scene.elements, snapped, nextFillColor);
+        if (!fillElement) {
+          state.setErrorMessage("No enclosed region was found at that point.");
+          return;
+        }
+        state.pushHistory();
+        state.setElements([fillElement, ...state.scene.elements]);
+        state.setSelection([fillElement.id]);
       }
       return;
     }
 
     if (state.activeTool === "eraser") {
-      const hit = findTopElement(snapped);
-      if (hit) {
-        state.pushHistory();
-        state.removeElements(getElementGroupMembers(state, hit).map((element) => element.id));
-      }
+      event.currentTarget.setPointerCapture(event.pointerId);
+      state.pushHistory();
+      interaction.mode = "erase";
+      applyEraseAlongPath(state, interaction.originWorld, snapped);
+      interaction.originWorld = snapped;
+      requestDraftRender();
       return;
     }
 
@@ -534,11 +648,18 @@ export const CanvasView = () => {
       return;
     }
 
-    const snapped = snapPoint(world, state.scene.snapToGrid);
+    const snapped = interaction.mode === "erase" ? world : snapPoint(world, state.scene.snapToGrid);
     const deltaWorld = { x: snapped.x - interaction.originWorld.x, y: snapped.y - interaction.originWorld.y };
 
     if (interaction.mode === "pan" && interaction.startViewport) {
       state.setViewport({ x: interaction.startViewport.x + screen.x - interaction.originScreen.x, y: interaction.startViewport.y + screen.y - interaction.originScreen.y });
+      return;
+    }
+
+    if (interaction.mode === "erase") {
+      applyEraseAlongPath(state, interaction.originWorld, snapped);
+      interaction.originWorld = snapped;
+      requestDraftRender();
       return;
     }
 
@@ -639,14 +760,12 @@ export const CanvasView = () => {
           pencil.updatedAt = Date.now();
           state.addElement(pencil);
           state.setSelection([pencil.id]);
-          state.setTool("select");
         }
       }
     }
 
     if (interaction.mode === "draw" && interaction.draftId) {
       state.setSelection([interaction.draftId]);
-      state.setTool("select");
     }
 
     interactionRef.current = initialInteraction();

@@ -12,6 +12,7 @@ import type {
   SelectionState,
   ThemeMode,
   ToolType,
+  EraserMode,
   ViewportState
 } from "../types/editor";
 import { DEFAULT_STYLE, cloneElement, stylePresets } from "../utils/element";
@@ -36,6 +37,8 @@ export interface EditorState {
   redo: () => void;
   setTool: (tool: ToolType) => void;
   setTheme: (theme: ThemeMode) => void;
+  setEraserMode: (mode: EraserMode) => void;
+  setEraserSize: (size: number) => void;
   toggleShortcuts: (open?: boolean) => void;
   setSelection: (selectedIds: string[]) => void;
   addElement: (element: DrawableElement, select?: boolean) => void;
@@ -88,7 +91,9 @@ const defaultPreferences: EditorPreferences = {
   theme: "system",
   showShortcuts: false,
   stylePreset: "clean",
-  lastUsedTool: "select"
+  lastUsedTool: "select",
+  eraserMode: "partial",
+  eraserSize: 20
 };
 
 const defaultExportSettings: ExportSettings = {
@@ -163,6 +168,8 @@ export const useEditorStore = create<EditorState>()(
       },
       setTool: (tool) => set((state) => ({ activeTool: tool, preferences: { ...state.preferences, lastUsedTool: tool } })),
       setTheme: (theme) => set((state) => ({ preferences: { ...state.preferences, theme } })),
+      setEraserMode: (eraserMode) => set((state) => ({ preferences: { ...state.preferences, eraserMode } })),
+      setEraserSize: (eraserSize) => set((state) => ({ preferences: { ...state.preferences, eraserSize } })),
       toggleShortcuts: (open) => set((state) => ({ preferences: { ...state.preferences, showShortcuts: open ?? !state.preferences.showShortcuts } })),
       setSelection: (selectedIds) => set({ selection: { selectedIds } }),
       addElement: (element, select = true) =>

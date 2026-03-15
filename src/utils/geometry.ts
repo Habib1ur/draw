@@ -87,6 +87,26 @@ export const isClosedLoop = (points: Point[], tolerance = 12) => {
   return distance(points[0], points[points.length - 1]) <= tolerance;
 };
 
+export const getLoopClosureTolerance = (points: Point[], strokeWidth = 1) => {
+  if (points.length < 3) return 0;
+  const bounds = boundsFromPoints(points);
+  const diagonal = Math.hypot(bounds.width, bounds.height);
+  return Math.min(64, Math.max(14, strokeWidth * 5, diagonal * 0.12));
+};
+
+export const isFillableLoop = (points: Point[], strokeWidth = 1) => {
+  const tolerance = getLoopClosureTolerance(points, strokeWidth);
+  return tolerance > 0 && isClosedLoop(points, tolerance);
+};
+
+export const closeLoopPoints = (points: Point[], strokeWidth = 1) => {
+  if (!isFillableLoop(points, strokeWidth)) return null;
+  if (distance(points[0], points[points.length - 1]) <= Math.max(1, strokeWidth * 0.5)) {
+    return points;
+  }
+  return [...points, points[0]];
+};
+
 export const pointInPolygon = (point: Point, polygon: Point[]) => {
   let inside = false;
   for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
@@ -115,6 +135,26 @@ export const distanceToSegment = (point: Point, start: Point, end: Point) => {
   return distance(point, projection);
 };
 
+export const elementWithinRadius = (point: Point, radius: number, element: DrawableElement) => {
+  const bounds = getElementBounds(element);
+  if (element.type === "line" || element.type === "arrow") {
+    return distanceToSegment(point, element.points[0], element.points[1]) <= radius + Math.max(4, element.style.strokeWidth / 2);
+  }
+
+  if (element.type === "pencil") {
+    for (let index = 0; index < element.points.length - 1; index += 1) {
+      if (distanceToSegment(point, element.points[index], element.points[index + 1]) <= radius + Math.max(4, element.style.strokeWidth / 2)) {
+        return true;
+      }
+    }
+    const closedPoints = closeLoopPoints(element.points, element.style.strokeWidth);
+    if (!closedPoints) return false;
+    return pointInPolygon(point, closedPoints);
+  }
+
+  return pointInBounds(point, bounds, radius);
+};
+
 export const hitTestElement = (point: Point, element: DrawableElement) => {
   const bounds = getElementBounds(element);
   if (element.type === "line" || element.type === "arrow") {
@@ -131,7 +171,8 @@ export const hitTestElement = (point: Point, element: DrawableElement) => {
         return bounds;
       }
     }
-    if (isClosedLoop(element.points, tolerance * 1.5) && pointInPolygon(point, element.points)) {
+    const closedPoints = closeLoopPoints(element.points, element.style.strokeWidth);
+    if (closedPoints && pointInPolygon(point, closedPoints)) {
       return bounds;
     }
     return null;
